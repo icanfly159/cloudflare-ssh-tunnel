@@ -69,14 +69,16 @@ ask() { # ask VAR "Prompt text" [default] [secret]
 }
 
 ask_hex32() { # ask_hex32 VAR "Prompt text"  (Cloudflare account/zone IDs)
-  local var=$1 prompt=$2 value=""
+  # NB: temp var must not collide with ask()'s locals (var/prompt/default/secret/value),
+  # otherwise printf -v in ask() writes to its own local and the answer is lost.
+  local hexvar=$1 hexprompt=$2 hexval=""
   while true; do
-    ask value "$prompt"
-    if [[ $value =~ ^[0-9a-f]{32}$ ]]; then break; fi
+    ask hexval "$hexprompt"
+    if [[ $hexval =~ ^[0-9a-f]{32}$ ]]; then break; fi
     warn "That doesn't look like a Cloudflare ID (32 hex characters). Try again."
-    value=""
+    hexval=""
   done
-  printf -v "$var" '%s' "$value"
+  printf -v "$hexvar" '%s' "$hexval"
 }
 
 ask_yn() { # ask_yn "Prompt text"  -> returns 0 for yes

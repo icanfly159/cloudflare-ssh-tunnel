@@ -12,8 +12,8 @@ Two access modes:
 ## Quick start (on the VM / server)
 
 ```bash
-git clone <this-repo>
-cd claudeflare-tunnel
+git clone https://github.com/icanfly159/cloudflare-ssh-tunnel.git
+cd cloudflare-ssh-tunnel/
 chmod +x setup.sh
 ./setup.sh
 ```

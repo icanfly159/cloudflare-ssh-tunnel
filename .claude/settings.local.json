@@ -5,7 +5,9 @@
       "Bash(chmod +x setup.sh)",
       "Bash(git init *)",
       "Bash(command -v shellcheck)",
-      "Bash(shellcheck -S warning setup.sh)"
+      "Bash(shellcheck -S warning setup.sh)",
+      "Bash(bash -c *)",
+      "Bash(bash -n /home/fian/tunnel-github/cloudflare-tunnel-ssh-setup/setup.sh)"
     ]
   }
 }
