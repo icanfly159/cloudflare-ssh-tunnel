@@ -1,0 +1,6 @@
+# Secrets - never commit these
+tunnel.env
+tunnel.json
+*.token
+*.pem
+.env
