@@ -96,8 +96,15 @@ ask_yn() { # ask_yn "Prompt text"  -> returns 0 for yes
 # =================================================== STEP 1 - access mode ===
 
 step "Step 1 / 5 · Access mode"
-echo "  1) Browser  - log in to SSH from a web browser (Cloudflare Access, no client install)"
-echo "  2) Terminal - classic ssh client through the tunnel (cloudflared on each client)"
+echo "  1) Browser  ${GREEN}(MORE SECURE - recommended)${RESET}"
+echo "               Login (One-Time PIN) is REQUIRED before SSH is reachable."
+echo "               Gives you BOTH: open your hostname in a browser, AND -"
+echo "               if you install cloudflared on the client - the normal"
+echo "               'ssh user@host' terminal too."
+echo "  2) Terminal ${YELLOW}(LESS SECURE)${RESET}"
+echo "               Classic ssh client only (cloudflared on each client)."
+echo "               No browser terminal. Login is optional - without it, the"
+echo "               SSH port is reachable by anyone through the tunnel."
 MODE=""
 while [[ -z $MODE ]]; do
   printf "Choose 1 or 2: "
@@ -108,6 +115,16 @@ while [[ -z $MODE ]]; do
   esac
 done
 ok "Mode: $MODE"
+
+# Tell the user up front exactly what this mode gives them.
+if [[ $MODE == "browser" ]]; then
+  echo "   ${GREEN}You get: browser access${RESET} (open your hostname in any browser),"
+  echo "   ${GREEN}AND terminal access${RESET} too IF you configure cloudflared on the client"
+  echo "   (the exact client steps are printed at the end, in Step 5)."
+else
+  echo "   You get: terminal access only ('ssh user@host' via cloudflared on the client)."
+  echo "   No browser terminal in this mode."
+fi
 
 USE_ACCESS="no"
 if [[ $MODE == "browser" ]]; then
@@ -430,6 +447,22 @@ ${BOLD}Browser mode - nothing to install on the client.${RESET}
   2. Open ${BOLD}https://$CF_DOMAIN${RESET} in any browser
   3. Log in with one of the allowed emails: ${ACCESS_EMAILS}
   4. A terminal opens in the browser - enter the VM username (and key/password)
+
+${BOLD}Want terminal access too? (optional)${RESET}
+The browser works with zero setup. To ALSO use 'ssh user@host', you MUST first
+do this configuration on EACH client machine - terminal will NOT work without it:
+
+  a. ${BOLD}Required:${RESET} install cloudflared on the client:
+       https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/download-warp/
+       (or: brew install cloudflared / the same .deb as the server)
+  b. ${BOLD}Required:${RESET} add this block to the client's ~/.ssh/config:
+
+       Host $CF_DOMAIN
+         ProxyCommand cloudflared access ssh --hostname %h
+         UserKnownHostsFile /dev/null
+         StrictHostKeyChecking accept-new
+  c. Then connect:  ssh <user>@$CF_DOMAIN
+       (first connection opens a browser to log in with one of: ${ACCESS_EMAILS})
 EOF
 else
   cat <<EOF
