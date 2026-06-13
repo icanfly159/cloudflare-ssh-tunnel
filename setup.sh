@@ -187,6 +187,10 @@ fi
 
 ACCESS_EMAILS=${ACCESS_EMAILS:-}
 if [[ $USE_ACCESS == "yes" && -z $ACCESS_EMAILS ]]; then
+  echo "These emails are allowed to log in. They sign in with a One-Time PIN -"
+  echo "a 6-digit code Cloudflare emails them - so NO Google/Gmail account is needed."
+  echo "(The 'One-time PIN' login method must be enabled in your Cloudflare"
+  echo " Zero Trust dashboard: Settings > Authentication. It is on by default.)"
   ask ACCESS_EMAILS "Email address(es) allowed to log in (comma-separated)"
 fi
 
@@ -360,7 +364,8 @@ if [[ $USE_ACCESS == "yes" ]]; then
   APP_ID=$(jq -r --arg d "$CF_DOMAIN" '.result[]? | select(.domain == $d) | .id' <<<"$APPS" | head -1)
 
   if [[ -n $APP_ID ]]; then
-    ok "Reusing existing Access application: $APP_ID"
+    warn "An Access application for $CF_DOMAIN already exists ($APP_ID)."
+    ok "Reusing it - NOT creating a duplicate application."
   else
     info "Creating Access application ($APP_TYPE)..."
     APP_RESP=$(cf_api POST "/accounts/$CF_ACCOUNT_ID/access/apps" "{
@@ -375,8 +380,12 @@ if [[ $USE_ACCESS == "yes" ]]; then
   fi
 
   POLICIES=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies")
-  if [[ "$(jq -r '.result | length' <<<"$POLICIES" 2>/dev/null || echo 0)" -gt 0 ]]; then
-    ok "Access policy already exists - keeping it"
+  POLICY_COUNT=$(jq -r '.result | length' <<<"$POLICIES" 2>/dev/null || echo 0)
+  if [[ $POLICY_COUNT -gt 0 ]]; then
+    warn "This application already has $POLICY_COUNT access policy/policies."
+    ok "Keeping the existing policy - NOT adding another allow rule."
+    echo "  (To change who can log in, edit this app's policy in the Zero Trust"
+    echo "   dashboard rather than re-running - that avoids duplicate rules.)"
   else
     info "Creating allow policy for: $ACCESS_EMAILS"
     INCLUDE_JSON=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
@@ -388,7 +397,7 @@ if [[ $USE_ACCESS == "yes" ]]; then
       \"include\": $INCLUDE_JSON
     }")
     require_success "$POLICY_RESP" "Access policy creation failed"
-    ok "Access policy created"
+    ok "Access policy created (listed emails log in with a one-time PIN)"
   fi
 fi
 
