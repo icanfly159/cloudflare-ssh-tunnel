@@ -213,10 +213,86 @@ if [[ $USE_ACCESS == "yes" && -z $ACCESS_EMAILS ]]; then
   ask ACCESS_EMAILS "Email address(es) allowed to log in (comma-separated)"
 fi
 
-info "Verifying token and zone..."
+# --- pre-flight credential & permission checks ------------------------------
+# Probe every Cloudflare resource this script will touch with a harmless GET,
+# BEFORE creating anything. A failure here is either a wrong ID or a token that
+# is missing the permission for that resource. We stop immediately and say
+# which, so a half-built tunnel / DNS record is never left behind.
+preflight() { # preflight RESPONSE "label" "permission hint" "id hint"
+  local resp=$1 label=$2 perm=$3 idhint=$4
+  if [[ "$(jq -r '.success // false' <<<"$resp")" == "true" ]]; then
+    ok "$label OK"
+    return 0
+  fi
+  local code msg
+  code=$(jq -r '.errors[0].code // 0' <<<"$resp")
+  msg=$(jq -r '.errors[0].message // "unknown error"' <<<"$resp")
+  echo
+  warn "Pre-flight check failed: $label"
+  # Authentication / authorization codes & wording -> missing token permission.
+  # Anything else (not found, could not route, invalid) -> a wrong ID.
+  if [[ $code == 9109 || $code == 10000 || $code == 9000 || $code == 9001 \
+        || $msg == *[Aa]uthentication* || $msg == *[Uu]nauthorized* \
+        || $msg == *[Pp]ermission* || $msg == *"not allowed"* ]]; then
+    echo "  ${RED}Your API token is missing a permission (or this token does not"
+    echo "  cover this account/zone).${RESET}"
+    echo "  Add this permission: ${BOLD}$perm${RESET}"
+    echo "  Edit the token at https://dash.cloudflare.com/profile/api-tokens"
+  else
+    echo "  ${RED}This looks like a wrong / mistyped ID.${RESET}"
+    echo "  Double-check: ${BOLD}$idhint${RESET}"
+  fi
+  echo "  Cloudflare said: $msg (code $code)"
+  die "Stopping now so nothing half-built is created. Fix the above and re-run."
+}
+
+info "Verifying credentials & permissions before building anything..."
+
+# 0) Is the token string itself valid (not a typo / expired)?
+VERIFY=$(cf_api GET "/user/tokens/verify")
+if [[ "$(jq -r '.success // false' <<<"$VERIFY")" != "true" ]]; then
+  echo
+  warn "The API token itself was rejected by Cloudflare."
+  echo "  Cloudflare said: $(jq -r '.errors[0].message // "invalid token"' <<<"$VERIFY")"
+  echo "  Re-create the token at https://dash.cloudflare.com/profile/api-tokens"
+  die "Bad or expired API token - fix it and re-run."
+fi
+ok "API token is valid"
+
+# 1) Account ID correct + Cloudflare Tunnel permission (needed to build tunnel)
+info "Checking Account ID + Cloudflare Tunnel permission..."
+TUN_CHECK=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel?per_page=1")
+preflight "$TUN_CHECK" "Account ID + Cloudflare Tunnel permission" \
+  "Account > Cloudflare Tunnel : Edit" \
+  "Account ID '$CF_ACCOUNT_ID' (copy it from your Cloudflare dashboard URL)"
+
+# 2) Zone ID correct (and token covers this zone)
+info "Checking Zone ID..."
 ZONE_RESP=$(cf_api GET "/zones/$CF_ZONE_ID")
-require_success "$ZONE_RESP" "Token/Zone check failed"
-ok "Token works - zone: $(jq -r '.result.name' <<<"$ZONE_RESP")"
+preflight "$ZONE_RESP" "Zone ID" \
+  "Zone > DNS : Edit (and the token must include this zone)" \
+  "Zone ID '$CF_ZONE_ID' (Overview tab of your domain in Cloudflare)"
+ok "Zone: $(jq -r '.result.name' <<<"$ZONE_RESP")"
+
+# 3) Zone > DNS:Edit permission (needed to point the hostname at the tunnel)
+info "Checking DNS permission..."
+DNS_CHECK=$(cf_api GET "/zones/$CF_ZONE_ID/dns_records?per_page=1")
+preflight "$DNS_CHECK" "Zone DNS permission" \
+  "Zone > DNS : Edit" \
+  "Zone ID '$CF_ZONE_ID'"
+
+# 4) Access: Apps and Policies permission - only when an Access app is needed.
+#    THIS is the common browser-mode trap: you picked browser (which requires an
+#    Access application + policy) but the token was made without this permission.
+if [[ $USE_ACCESS == "yes" ]]; then
+  info "Checking Access (Apps and Policies) permission..."
+  ACCESS_CHECK=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/apps?per_page=1")
+  preflight "$ACCESS_CHECK" "Access Apps and Policies permission" \
+    "Account > Access: Apps and Policies : Edit  (required for browser mode / Access)" \
+    "Account ID '$CF_ACCOUNT_ID'"
+fi
+
+ok "All credential & permission checks passed"
 
 # Resolve tunnel-name conflicts up front: on a repeated run you can either
 # reuse the existing tunnel or pick a fresh name - never a silent collision.
