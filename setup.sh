@@ -195,6 +195,7 @@ if [[ -z ${CF_API_TOKEN:-} ]]; then
   echo "  - Account > Cloudflare Tunnel : Edit"
   echo "  - Zone > DNS : Edit"
   [[ $USE_ACCESS == "yes" ]] && echo "  - Account > Access: Apps and Policies : Edit  (required for browser mode / Access)"
+  [[ $USE_ACCESS == "yes" ]] && echo "  - Account > Access: Organizations, Identity Providers, and Groups : Read  (to require One-Time PIN login)"
   ask CF_API_TOKEN "1/5  API Token (input hidden)" "" secret
 fi
 [[ -z ${CF_ACCOUNT_ID:-} ]]  && ask_hex32 CF_ACCOUNT_ID "2/5  Account ID"
@@ -288,6 +289,24 @@ if [[ $USE_ACCESS == "yes" ]]; then
   preflight "$ACCESS_CHECK" "Access Apps and Policies permission" \
     "Account > Access: Apps and Policies : Edit  (required for browser mode / Access)" \
     "Account ID '$CF_ACCOUNT_ID'"
+
+  # The policy must REQUIRE the "One-time PIN" login method. That method is an
+  # identity provider on the account; we look up its id here so the policy can
+  # reference it. Reading identity providers needs its own token permission.
+  info "Checking Access (Identity Providers) permission + locating One-Time PIN..."
+  IDP_RESP=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/identity_providers")
+  preflight "$IDP_RESP" "Access Identity Providers permission" \
+    "Account > Access: Organizations, Identity Providers, and Groups : Read" \
+    "Account ID '$CF_ACCOUNT_ID'"
+  OTP_IDP_ID=$(jq -r '.result[]? | select(.type == "onetimepin") | .id' <<<"$IDP_RESP" | head -1)
+  if [[ -z $OTP_IDP_ID ]]; then
+    echo
+    warn "The 'One-time PIN' login method is not enabled on this account."
+    echo "  Enable it in the Zero Trust dashboard:"
+    echo "    Settings > Authentication > Login methods > add 'One-time PIN'."
+    die "One-Time PIN must be enabled so the policy can require it. Enable it and re-run."
+  fi
+  ok "One-Time PIN login method found ($OTP_IDP_ID)"
 fi
 
 ok "All credential & permission checks passed"
@@ -375,6 +394,42 @@ if [[ $USE_ACCESS == "yes" ]]; then
   APP_TYPE="self_hosted"
   [[ $MODE == "browser" ]] && APP_TYPE="ssh"
 
+  # --- 1. Reusable Access policy (created first, then attached to the app) ---
+  # One account-level "one-time-pin" policy that any app can share:
+  #   include = the allowed emails        -> match ANY one of them
+  #   require = the One-Time PIN method    -> must ALWAYS hold
+  # Putting the login method in REQUIRE is the fix for "terminal just gets
+  # approved": it forces EVERY login - terminal and browser alike - through the
+  # emailed 6-digit PIN, instead of silently reusing some other session.
+  POLICY_NAME="one-time-pin"
+  INCLUDE_JSON=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
+    | jq -R '{email:{email:.}}' | jq -s '.')
+  REQUIRE_JSON="[{\"login_method\":{\"id\":\"$OTP_IDP_ID\"}}]"
+
+  info "Access: looking for an existing reusable policy named '$POLICY_NAME'..."
+  POL_LIST=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/policies")
+  require_success "$POL_LIST" "Could not list reusable Access policies"
+  POLICY_ID=$(jq -r --arg n "$POLICY_NAME" '.result[]? | select(.name == $n) | .id' <<<"$POL_LIST" | head -1)
+
+  if [[ -n $POLICY_ID ]]; then
+    warn "A reusable policy named '$POLICY_NAME' already exists ($POLICY_ID)."
+    ok "Reusing it - NOT creating a duplicate policy."
+    echo "  (To change who can log in, edit this policy in the Zero Trust"
+    echo "   dashboard > Access > Policies, then re-run - that avoids duplicates.)"
+  else
+    info "Creating reusable policy '$POLICY_NAME' (One-Time PIN required for: $ACCESS_EMAILS)"
+    POLICY_RESP=$(cf_api POST "/accounts/$CF_ACCOUNT_ID/access/policies" "{
+      \"name\": \"$POLICY_NAME\",
+      \"decision\": \"allow\",
+      \"include\": $INCLUDE_JSON,
+      \"require\": $REQUIRE_JSON
+    }")
+    require_success "$POLICY_RESP" "Reusable policy creation failed"
+    POLICY_ID=$(jq -r '.result.id' <<<"$POLICY_RESP")
+    ok "Reusable policy created: $POLICY_ID"
+  fi
+
+  # --- 2. Access application (created or reused), with the policy attached ---
   info "Access: checking for existing application on $CF_DOMAIN..."
   APPS=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/apps")
   require_success "$APPS" "Could not list Access applications"
@@ -383,38 +438,38 @@ if [[ $USE_ACCESS == "yes" ]]; then
   if [[ -n $APP_ID ]]; then
     warn "An Access application for $CF_DOMAIN already exists ($APP_ID)."
     ok "Reusing it - NOT creating a duplicate application."
+    # Make sure our '$POLICY_NAME' policy is attached to the reused app.
+    ATTACHED=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies")
+    require_success "$ATTACHED" "Could not read the application's policies"
+    HAS_POLICY=$(jq -r --arg id "$POLICY_ID" '.result[]? | select(.id == $id) | .id' <<<"$ATTACHED" | head -1)
+    if [[ -n $HAS_POLICY ]]; then
+      ok "Policy '$POLICY_NAME' is already attached to this application."
+    else
+      info "Attaching policy '$POLICY_NAME' to the existing application..."
+      # Keep whatever policies are already attached, then add ours (no clobber).
+      POLICIES_JSON=$(jq -c --arg id "$POLICY_ID" '[.result[]?.id] + [$id] | unique' <<<"$ATTACHED")
+      ATTACH_RESP=$(cf_api PUT "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID" "{
+        \"name\": \"SSH - $CF_DOMAIN\",
+        \"domain\": \"$CF_DOMAIN\",
+        \"type\": \"$APP_TYPE\",
+        \"session_duration\": \"24h\",
+        \"policies\": $POLICIES_JSON
+      }")
+      require_success "$ATTACH_RESP" "Could not attach policy to existing application"
+      ok "Policy attached to application."
+    fi
   else
-    info "Creating Access application ($APP_TYPE)..."
+    info "Creating Access application ($APP_TYPE) with policy '$POLICY_NAME'..."
     APP_RESP=$(cf_api POST "/accounts/$CF_ACCOUNT_ID/access/apps" "{
       \"name\": \"SSH - $CF_DOMAIN\",
       \"domain\": \"$CF_DOMAIN\",
       \"type\": \"$APP_TYPE\",
-      \"session_duration\": \"24h\"
+      \"session_duration\": \"24h\",
+      \"policies\": [{\"id\": \"$POLICY_ID\", \"precedence\": 1}]
     }")
     require_success "$APP_RESP" "Access application creation failed"
     APP_ID=$(jq -r '.result.id' <<<"$APP_RESP")
-    ok "Access application created: $APP_ID"
-  fi
-
-  POLICIES=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies")
-  POLICY_COUNT=$(jq -r '.result | length' <<<"$POLICIES" 2>/dev/null || echo 0)
-  if [[ $POLICY_COUNT -gt 0 ]]; then
-    warn "This application already has $POLICY_COUNT access policy/policies."
-    ok "Keeping the existing policy - NOT adding another allow rule."
-    echo "  (To change who can log in, edit this app's policy in the Zero Trust"
-    echo "   dashboard rather than re-running - that avoids duplicate rules.)"
-  else
-    info "Creating allow policy for: $ACCESS_EMAILS"
-    INCLUDE_JSON=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
-      | jq -R '{email:{email:.}}' | jq -s '.')
-    POLICY_RESP=$(cf_api POST "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies" "{
-      \"name\": \"Allow listed emails\",
-      \"decision\": \"allow\",
-      \"precedence\": 1,
-      \"include\": $INCLUDE_JSON
-    }")
-    require_success "$POLICY_RESP" "Access policy creation failed"
-    ok "Access policy created (listed emails log in with a one-time PIN)"
+    ok "Access application created: $APP_ID (policy attached)"
   fi
 fi
 
@@ -491,8 +546,9 @@ ${BOLD}Terminal mode - do this on each CLIENT machine:${RESET}
 EOF
   if [[ $USE_ACCESS == "yes" ]]; then
     echo
-    echo "  (Access policy is on: the first connection opens a browser to log in"
-    echo "   with one of: ${ACCESS_EMAILS})"
+    echo "  (Access policy is on: the first connection opens a browser and now"
+    echo "   REQUIRES a One-Time PIN - a 6-digit code Cloudflare emails to one of:"
+    echo "   ${ACCESS_EMAILS}. Terminal logins are prompted for the PIN too.)"
   fi
 fi
 echo
