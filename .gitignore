@@ -4,3 +4,6 @@ tunnel.json
 *.token
 *.pem
 .env
+
+# Claude Code local settings - never commit
+.claude/
