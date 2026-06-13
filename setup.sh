@@ -175,9 +175,10 @@ else
   if command -v docker >/dev/null; then
     ok "Docker installed"
   else
-    info "Installing Docker (get.docker.com)..."
-    curl -fsSL https://get.docker.com | $SUDO sh
-    ok "Docker installed"
+    warn "Docker is not installed on this machine."
+    echo "  Install Docker first, then re-run this script."
+    echo "  Official install guide: ${BOLD}https://docs.docker.com/engine/install/${RESET}"
+    die "Docker is required for the Docker runtime - install it and re-run."
   fi
 fi
 
@@ -199,8 +200,10 @@ fi
 
 if [[ -z ${CF_API_TOKEN:-} ]]; then
   echo "Create an API token at https://dash.cloudflare.com/profile/api-tokens"
-  echo "Needed permissions: Account > Cloudflare Tunnel:Edit, Zone > DNS:Edit"
-  [[ $USE_ACCESS == "yes" ]] && echo "                    Account > Access: Apps and Policies:Edit"
+  echo "This token needs the following permissions:"
+  echo "  - Account > Cloudflare Tunnel : Edit"
+  echo "  - Zone > DNS : Edit"
+  [[ $USE_ACCESS == "yes" ]] && echo "  - Account > Access: Apps and Policies : Edit  (required for browser mode / Access)"
   ask CF_API_TOKEN "1/5  API Token (input hidden)" "" secret
 fi
 [[ -z ${CF_ACCOUNT_ID:-} ]]  && ask_hex32 CF_ACCOUNT_ID "2/5  Account ID"
@@ -314,6 +317,9 @@ while true; do
   ask CF_TUNNEL_NAME "New tunnel name"
 done
 
+# umask 077 makes a NEWLY created file 0600; the explicit chmod below also
+# tightens an EXISTING tunnel.env (umask does not change perms on a file that
+# already exists - `cat >` only truncates it), so the token is always private.
 umask 077
 cat >"$ENV_FILE" <<EOF
 # Cloudflare tunnel secrets - DO NOT COMMIT (this file is gitignored)
@@ -324,7 +330,8 @@ CF_DOMAIN="$CF_DOMAIN"
 CF_TUNNEL_NAME="$CF_TUNNEL_NAME"
 ACCESS_EMAILS="$ACCESS_EMAILS"
 EOF
-ok "Saved to tunnel.env (chmod 600, gitignored)"
+chmod 600 "$ENV_FILE"
+ok "Saved to tunnel.env (chmod 600, owner-only, gitignored)"
 
 # ========================================== STEP 4 - automatic build =======
 
