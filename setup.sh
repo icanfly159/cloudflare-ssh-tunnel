@@ -116,21 +116,6 @@ elif ask_yn "Also protect the tunnel with a Cloudflare Access policy (login requ
   USE_ACCESS="yes"
 fi
 
-echo
-echo "Run cloudflared on this server as:"
-echo "  1) Native systemd service"
-echo "  2) Docker container"
-RUNTIME=""
-while [[ -z $RUNTIME ]]; do
-  printf "Choose 1 or 2: "
-  read -r choice
-  case $choice in
-    1) RUNTIME="native" ;;
-    2) RUNTIME="docker" ;;
-  esac
-done
-ok "Runtime: $RUNTIME"
-
 # ================================================ STEP 2 - prerequisites ===
 
 step "Step 2 / 5 · Checking prerequisites"
@@ -160,26 +145,15 @@ else
   ok "SSH server installed and started"
 fi
 
-if [[ $RUNTIME == "native" ]]; then
-  if command -v cloudflared >/dev/null; then
-    ok "cloudflared installed ($(cloudflared --version 2>/dev/null | head -1))"
-  else
-    info "Installing cloudflared..."
-    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
-      -o /tmp/cloudflared.deb
-    $SUDO dpkg -i /tmp/cloudflared.deb >/dev/null
-    rm -f /tmp/cloudflared.deb
-    ok "cloudflared installed"
-  fi
+if command -v cloudflared >/dev/null; then
+  ok "cloudflared installed ($(cloudflared --version 2>/dev/null | head -1))"
 else
-  if command -v docker >/dev/null; then
-    ok "Docker installed"
-  else
-    warn "Docker is not installed on this machine."
-    echo "  Install Docker first, then re-run this script."
-    echo "  Official install guide: ${BOLD}https://docs.docker.com/engine/install/${RESET}"
-    die "Docker is required for the Docker runtime - install it and re-run."
-  fi
+  info "Installing cloudflared..."
+  curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+    -o /tmp/cloudflared.deb
+  $SUDO dpkg -i /tmp/cloudflared.deb >/dev/null
+  rm -f /tmp/cloudflared.deb
+  ok "cloudflared installed"
 fi
 
 # ============================================= STEP 3 - tokens and IDs =====
@@ -423,22 +397,13 @@ TOKEN_RESP=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/token
 require_success "$TOKEN_RESP" "Could not fetch tunnel token"
 TUNNEL_TOKEN=$(jq -r '.result' <<<"$TOKEN_RESP")
 
-if [[ $RUNTIME == "native" ]]; then
-  if [[ -f /etc/systemd/system/cloudflared.service ]]; then
-    warn "cloudflared service already installed - reinstalling with current token"
-    $SUDO cloudflared service uninstall >/dev/null 2>&1 || true
-  fi
-  info "Installing cloudflared systemd service..."
-  $SUDO cloudflared service install "$TUNNEL_TOKEN"
-  ok "cloudflared service running (systemctl status cloudflared)"
-else
-  info "Starting cloudflared Docker container..."
-  $SUDO docker rm -f cloudflared >/dev/null 2>&1 || true
-  $SUDO docker run -d --name cloudflared --restart unless-stopped --network host \
-    -e TUNNEL_TOKEN="$TUNNEL_TOKEN" \
-    cloudflare/cloudflared:latest tunnel --no-autoupdate run >/dev/null
-  ok "cloudflared container running (docker logs -f cloudflared)"
+if [[ -f /etc/systemd/system/cloudflared.service ]]; then
+  warn "cloudflared service already installed - reinstalling with current token"
+  $SUDO cloudflared service uninstall >/dev/null 2>&1 || true
 fi
+info "Installing cloudflared systemd service..."
+$SUDO cloudflared service install "$TUNNEL_TOKEN"
+ok "cloudflared service running (systemctl status cloudflared)"
 
 # ========================================= STEP 5 - client-side reminder ===
 
