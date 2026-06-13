@@ -13,9 +13,7 @@ Two access modes:
 
 ```bash
 git clone https://github.com/icanfly159/cloudflare-ssh-tunnel.git
-cd cloudflare-ssh-tunnel/
-chmod +x setup.sh
-./setup.sh
+cd cloudflare-ssh-tunnel/ && chmod +x setup.sh && ./setup.sh
 ```
 
 
