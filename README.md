@@ -51,3 +51,10 @@ README.md    ← you are here
 Command.md   ← manual step-by-step reference (what the script automates)
 tunnel.env   ← created at runtime, holds YOUR secrets, gitignored
 ```
+
+
+## Doesn't
+
+```
+ssh-keygen -f "$HOME/.ssh/known_hosts" -R 'ssh.fian.host' 2>&1 || echo "(no entry to remove - fine)"; echo "--- script syntax ---"; bash -n /home/fian/tunnel-github/cloudflare-tunnel-ssh-setup/setup.sh && echo "syntax OK"
+```
