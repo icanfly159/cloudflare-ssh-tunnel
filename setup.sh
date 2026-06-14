@@ -17,16 +17,6 @@ CF_API="https://api.cloudflare.com/client/v4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/tunnel.env"
 
-# cloudflared install is PINNED (not "latest") so a run is reproducible and an
-# upstream release can't change what you install underneath you.
-# Bump this from https://github.com/cloudflare/cloudflared/releases when you want
-# a newer version.
-CLOUDFLARED_VERSION="2024.12.2"
-# Optional integrity check: paste the sha256 of the .deb for YOUR architecture
-# (see the releases page) to have the script verify the download before install.
-# Leave empty to skip. NB: the checksum is per-architecture.
-CLOUDFLARED_SHA256=""
-
 RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; CYAN=$'\e[36m'; BOLD=$'\e[1m'; RESET=$'\e[0m'
 
 info() { echo "${CYAN}==>${RESET} $*"; }
@@ -198,20 +188,15 @@ else
     *) die "Unsupported CPU architecture '$(uname -m)'. Install cloudflared manually
   from https://github.com/cloudflare/cloudflared/releases and re-run." ;;
   esac
-  CF_DEB_URL="https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-$CF_ARCH.deb"
-  info "Installing cloudflared $CLOUDFLARED_VERSION ($CF_ARCH)..."
+  # Always pull the latest release for the detected architecture.
+  CF_DEB_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$CF_ARCH.deb"
+  info "Installing latest cloudflared ($CF_ARCH)..."
   curl -fsSL "$CF_DEB_URL" -o /tmp/cloudflared.deb \
     || die "Download failed: $CF_DEB_URL
-  Check that version '$CLOUDFLARED_VERSION' exists for '$CF_ARCH' on the releases page."
-  if [[ -n $CLOUDFLARED_SHA256 ]]; then
-    info "Verifying download checksum..."
-    echo "$CLOUDFLARED_SHA256  /tmp/cloudflared.deb" | sha256sum -c - \
-      || { rm -f /tmp/cloudflared.deb; die "Checksum mismatch - refusing to install a tampered or wrong-arch file."; }
-    ok "Checksum verified"
-  fi
+  Check your network and that '$CF_ARCH' builds exist on the releases page."
   $SUDO dpkg -i /tmp/cloudflared.deb >/dev/null
   rm -f /tmp/cloudflared.deb
-  ok "cloudflared $CLOUDFLARED_VERSION installed"
+  ok "cloudflared installed"
 fi
 
 # ============================================= STEP 3 - tokens and IDs =====
