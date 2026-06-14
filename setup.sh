@@ -102,9 +102,11 @@ echo "               Gives you BOTH: open your hostname in a browser, AND -"
 echo "               if you install cloudflared on the client - the normal"
 echo "               'ssh user@host' terminal too."
 echo "  2) Terminal ${YELLOW}(LESS SECURE)${RESET}"
-echo "               Classic ssh client only (cloudflared on each client)."
-echo "               No browser terminal. Login is optional - without it, the"
-echo "               SSH port is reachable by anyone through the tunnel."
+echo "               Classic 'ssh user@host' only, and ONLY works if you set up"
+echo "               cloudflared on each client machine first."
+echo "               No browser terminal, and NO login required - the SSH port"
+echo "               is reachable by anyone through the tunnel."
+echo "               (If you want login required, choose option 1 instead.)"
 MODE=""
 while [[ -z $MODE ]]; do
   printf "Choose 1 or 2: "
@@ -129,9 +131,10 @@ fi
 USE_ACCESS="no"
 if [[ $MODE == "browser" ]]; then
   USE_ACCESS="yes"   # browser mode always needs an Access application + policy
-elif ask_yn "Also protect the tunnel with a Cloudflare Access policy (login required)?"; then
-  USE_ACCESS="yes"
 fi
+# Terminal mode intentionally has NO login/Access policy and is never asked
+# about it. If you want login required, use option 1 (Browser), which always
+# enforces One-Time PIN login.
 
 # ================================================ STEP 2 - prerequisites ===
 
