@@ -69,6 +69,8 @@ Go to https://dash.cloudflare.com/profile/api-tokens → **Create Token** → **
 - Account → **Access: Apps and Policies : Edit**
 - Account → **Access: Organizations, Identity Providers, and Groups : Read**
 
+<img width="1280" height="720" alt="Image" src="https://github.com/user-attachments/assets/167aad6a-21e0-43c3-b61e-cd8a5c2f0933" />
+
 ### Step 2 — Find your Account ID and Zone ID
 
 Open your domain in the [Cloudflare dashboard](https://dash.cloudflare.com). On the domain's **Overview** page (right-hand side / "API" box) you'll see:
@@ -106,6 +108,10 @@ Go to https://dash.cloudflare.com/profile/api-tokens → **Create Custom Token**
 - Zone → **DNS : Edit**
 
 You'll also need your **Account ID** and **Zone ID** (domain **Overview** page in the dashboard).
+
+> 📷 Not sure where to find these? Check the screenshot below.
+
+<img width="1280" height="720" alt="Image" src="https://github.com/user-attachments/assets/4b8a2627-b1d2-4ef7-aa2c-4fa308143d99" />
 
 ### Step 2 — Run the script
 
