@@ -78,6 +78,8 @@ Open your domain in the [Cloudflare dashboard](https://dash.cloudflare.com). On 
 
 Both are 32-character codes. You paste them into the script when asked.
 
+<img width="1280" height="720" alt="Image" src="https://github.com/user-attachments/assets/83fc6db2-3932-46f4-93dc-3cf6c0960d2b" />
+
 ### Step 3 — Run the script
 
 It asks, one at a time: **API token → Account ID → Zone ID → hostname → tunnel name**, then the **emails** allowed to log in (add them one at a time; answer `n` to "add another?" when done). It then builds the tunnel, DNS record, and login policy.
