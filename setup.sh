@@ -6,7 +6,9 @@
 #   - Browser mode  : log in to SSH from a web browser (Cloudflare Access)
 #   - Terminal mode : classic `ssh` client through the tunnel
 #
-# Secrets you enter are saved to ./tunnel.env (chmod 600, gitignored).
+# Non-secret settings (account/zone IDs, hostname, tunnel name, allowed emails)
+# are saved to ./tunnel.env (chmod 600, gitignored) so re-runs are quick.
+# The API TOKEN is deliberately NEVER written to disk - you re-enter it each run.
 # Safe to re-run: existing tunnel / DNS record / Access app are reused.
 #
 set -euo pipefail
@@ -14,6 +16,16 @@ set -euo pipefail
 CF_API="https://api.cloudflare.com/client/v4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/tunnel.env"
+
+# cloudflared install is PINNED (not "latest") so a run is reproducible and an
+# upstream release can't change what you install underneath you.
+# Bump this from https://github.com/cloudflare/cloudflared/releases when you want
+# a newer version.
+CLOUDFLARED_VERSION="2024.12.2"
+# Optional integrity check: paste the sha256 of the .deb for YOUR architecture
+# (see the releases page) to have the script verify the download before install.
+# Leave empty to skip. NB: the checksum is per-architecture.
+CLOUDFLARED_SHA256=""
 
 RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; CYAN=$'\e[36m'; BOLD=$'\e[1m'; RESET=$'\e[0m'
 
@@ -140,6 +152,13 @@ fi
 
 step "Step 2 / 5 · Checking prerequisites"
 
+# This script auto-installs packages with apt-get, so it only works on Debian/
+# Ubuntu. Fail loudly and early elsewhere instead of erroring deep inside Step 2.
+if ! command -v apt-get >/dev/null; then
+  die "This installer needs apt-get (Debian/Ubuntu). On a different distro, install
+  curl, jq, openssh-server and cloudflared manually, then re-run."
+fi
+
 APT_UPDATED="no"
 apt_install() {
   if [[ $APT_UPDATED == "no" ]]; then $SUDO apt-get update -qq; APT_UPDATED="yes"; fi
@@ -168,12 +187,31 @@ fi
 if command -v cloudflared >/dev/null; then
   ok "cloudflared installed ($(cloudflared --version 2>/dev/null | head -1))"
 else
-  info "Installing cloudflared..."
-  curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
-    -o /tmp/cloudflared.deb
+  # Map this machine's CPU to the matching cloudflared .deb. The old script
+  # hardcoded amd64, which silently installed the wrong/no package on ARM boxes
+  # (Raspberry Pi, ARM cloud VMs, etc.).
+  case "$(uname -m)" in
+    x86_64|amd64)        CF_ARCH="amd64" ;;
+    aarch64|arm64)       CF_ARCH="arm64" ;;
+    armv7l|armv6l|armhf) CF_ARCH="arm"   ;;
+    i386|i686)           CF_ARCH="386"   ;;
+    *) die "Unsupported CPU architecture '$(uname -m)'. Install cloudflared manually
+  from https://github.com/cloudflare/cloudflared/releases and re-run." ;;
+  esac
+  CF_DEB_URL="https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-$CF_ARCH.deb"
+  info "Installing cloudflared $CLOUDFLARED_VERSION ($CF_ARCH)..."
+  curl -fsSL "$CF_DEB_URL" -o /tmp/cloudflared.deb \
+    || die "Download failed: $CF_DEB_URL
+  Check that version '$CLOUDFLARED_VERSION' exists for '$CF_ARCH' on the releases page."
+  if [[ -n $CLOUDFLARED_SHA256 ]]; then
+    info "Verifying download checksum..."
+    echo "$CLOUDFLARED_SHA256  /tmp/cloudflared.deb" | sha256sum -c - \
+      || { rm -f /tmp/cloudflared.deb; die "Checksum mismatch - refusing to install a tampered or wrong-arch file."; }
+    ok "Checksum verified"
+  fi
   $SUDO dpkg -i /tmp/cloudflared.deb >/dev/null
   rm -f /tmp/cloudflared.deb
-  ok "cloudflared installed"
+  ok "cloudflared $CLOUDFLARED_VERSION installed"
 fi
 
 # ============================================= STEP 3 - tokens and IDs =====
@@ -182,7 +220,7 @@ step "Step 3 / 5 · Cloudflare credentials (one value at a time)"
 
 SAVED_DOMAIN=""; SAVED_TUNNEL_NAME=""
 if [[ -f $ENV_FILE ]]; then
-  if ask_yn "Found saved credentials in tunnel.env - reuse token/account/zone?"; then
+  if ask_yn "Found saved settings in tunnel.env - reuse account/zone/domain? (the API token is always re-entered)"; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     # Hostname and tunnel name are always re-asked (saved values become the
@@ -341,13 +379,15 @@ while true; do
   ask CF_TUNNEL_NAME "New tunnel name"
 done
 
+# The API token is intentionally NOT saved here - never written to disk - so a
+# leaked/backed-up/committed tunnel.env can't hand an attacker your token.
 # umask 077 makes a NEWLY created file 0600; the explicit chmod below also
 # tightens an EXISTING tunnel.env (umask does not change perms on a file that
-# already exists - `cat >` only truncates it), so the token is always private.
+# already exists - `cat >` only truncates it), so these settings stay owner-only.
 umask 077
 cat >"$ENV_FILE" <<EOF
-# Cloudflare tunnel secrets - DO NOT COMMIT (this file is gitignored)
-CF_API_TOKEN="$CF_API_TOKEN"
+# Cloudflare tunnel settings (gitignored). NOTE: the API token is NOT stored
+# here on purpose - you re-enter it on each run.
 CF_ACCOUNT_ID="$CF_ACCOUNT_ID"
 CF_ZONE_ID="$CF_ZONE_ID"
 CF_DOMAIN="$CF_DOMAIN"
@@ -355,7 +395,7 @@ CF_TUNNEL_NAME="$CF_TUNNEL_NAME"
 ACCESS_EMAILS="$ACCESS_EMAILS"
 EOF
 chmod 600 "$ENV_FILE"
-ok "Saved to tunnel.env (chmod 600, owner-only, gitignored)"
+ok "Settings saved to tunnel.env (chmod 600, owner-only, gitignored; no token inside)"
 
 # ========================================== STEP 4 - automatic build =======
 
@@ -546,6 +586,12 @@ do this configuration on EACH client machine - terminal will NOT work without it
          ProxyCommand cloudflared access ssh --hostname %h
          UserKnownHostsFile /dev/null
          StrictHostKeyChecking accept-new
+
+     ${YELLOW}! Heads up:${RESET} the last two lines turn OFF SSH host-key checking for
+       this host - no host key is saved or compared, so SSH will NOT warn you if
+       the server's identity ever changes. That is intentional here (Cloudflare
+       Access is the trust layer), but if you'd rather verify host keys the normal
+       way, delete those two lines.
   c. Then connect:  ssh <user>@$CF_DOMAIN
        (first connection opens a browser to log in with one of: ${ACCESS_EMAILS})
 EOF
@@ -564,6 +610,11 @@ ${BOLD}Terminal mode - do this on each CLIENT machine:${RESET}
          UserKnownHostsFile /dev/null
          StrictHostKeyChecking accept-new
 
+     ${YELLOW}! Heads up:${RESET} the last two lines turn OFF SSH host-key checking for
+       this host - no host key is saved or compared, so SSH will NOT warn you if
+       the server's identity ever changes. That is intentional for tunnelled SSH,
+       but if you'd rather verify host keys the normal way, delete those two lines.
+
   3. On THIS server, paste the client's PUBLIC key into
      ~/.ssh/authorized_keys of the user you'll log in as.
 
@@ -578,4 +629,4 @@ EOF
   fi
 fi
 echo
-ok "Done. Secrets are in tunnel.env - never commit that file."
+ok "Done. Settings are in tunnel.env (no token inside) - it's gitignored either way."

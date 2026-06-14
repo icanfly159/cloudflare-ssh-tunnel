@@ -141,6 +141,8 @@ Host ssh.example.com
   StrictHostKeyChecking accept-new
 ```
 
+> ⚠️ **Heads up:** the last two lines turn **off SSH host-key checking** for this host — no host key is saved or compared, so SSH will **not** warn you if the server's identity ever changes. This is intentional for tunnelled SSH (Cloudflare is the trust layer), but if you'd rather verify host keys the normal way, delete those two lines.
+
 **3. Add your public key to the server — run this ON the VM**
 
 Copy the **public** key text you printed earlier in [Set up your SSH key first](#set-up-your-ssh-key-first-recommended), then run this **on the VM/server** (paste your key in place of the example), as the user you'll log in as:
