@@ -531,10 +531,6 @@ ${BOLD}Terminal mode - do this on each CLIENT machine:${RESET}
 
        Host $CF_DOMAIN
          ProxyCommand cloudflared access ssh --hostname %h
-         # Same domain may point at a rebuilt / different VM over time, so its
-         # host key changes. These two lines (scoped to THIS host only) stop the
-         # "REMOTE HOST IDENTIFICATION HAS CHANGED" error for $CF_DOMAIN.
-         # All your OTHER ssh hosts keep normal, strict host-key checking.
          UserKnownHostsFile /dev/null
          StrictHostKeyChecking accept-new
 
