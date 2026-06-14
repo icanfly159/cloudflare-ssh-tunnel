@@ -443,7 +443,7 @@ if [[ $USE_ACCESS == "yes" ]]; then
   # (one-time-pin, then one-time-pin(1), (2), ...) so existing policies are never
   # overwritten.
   INCLUDE_JSON=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
-    | jq -R '{email:{email:.}}' | jq -s '.')
+    | jq -R '{email:{email:.}}' | jq -s 'unique')
   REQUIRE_JSON="[{\"login_method\":{\"id\":\"$OTP_IDP_ID\"}}]"
   # Normalized (trimmed, de-duped) list of just the email strings we want to allow.
   DESIRED_EMAILS=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
