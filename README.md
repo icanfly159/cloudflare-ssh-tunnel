@@ -109,7 +109,7 @@ Go to https://dash.cloudflare.com/profile/api-tokens → **Create Custom Token**
 
 You'll also need your **Account ID** and **Zone ID** (domain **Overview** page in the dashboard).
 
-> 📷 Not sure where to find these? Check the screenshot below.
+> 📷 Not sure where to find these? Jump to [Browser setup → Step 2](#step-2--find-your-account-id-and-zone-id), which shows where the Account ID and Zone ID are.
 
 <img width="1280" height="720" alt="Image" src="https://github.com/user-attachments/assets/4b8a2627-b1d2-4ef7-aa2c-4fa308143d99" />
 
