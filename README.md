@@ -118,16 +118,6 @@ ssh <your-user>@ssh.example.com
 ```
 In Browser mode, the first connection opens a browser to log in; after that it just works.
 
----
 
-## Notes
 
-- Everything you enter is saved to **`tunnel.env`** (`chmod 600`, gitignored) so re-runs don't re-ask — **never commit it.**
-- Re-running is safe: existing tunnel, DNS record, and login policy are reused, not duplicated.
-- Different VM with different allowed emails? The script makes a separate login policy (`one-time-pin(1)`, …) instead of overwriting the old one.
 
-```
-setup.sh     ← the script — run this on the server
-README.md    ← you are here
-tunnel.env   ← created at runtime, holds YOUR secrets, gitignored
-```
