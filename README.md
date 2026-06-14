@@ -11,9 +11,41 @@ git clone https://github.com/icanfly159/cloudflare-ssh-tunnel.git
 cd cloudflare-ssh-tunnel && chmod +x setup.sh && ./setup.sh
 ```
 
-The very first question the script asks is **which mode you want**. Pick one and jump to its guide:
+---
 
-### 👉 Choose your mode
+## Set up your SSH key first (recommended)
+
+A key is safer than a password and saves you typing one every time. Do this **on the client machine** you'll connect from (the computer you SSH *from*). Pick your operating system — each is **one command:**
+
+
+
+**🍏 macOS & 🐧 Linux**
+```bash
+ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f ~/.ssh/id_ed25519 -N ""
+```
+
+**🪟 Windows (PowerShell)**
+```powershell
+ssh-keygen -t ed25519 -C "$env:USERNAME@$env:COMPUTERNAME" -f "$env:USERPROFILE\.ssh\id_ed25519" -N '""'
+```
+
+This creates two files — a **private** key (keep secret, never share) and a **public** key (this is what goes on the server):
+
+| | Private key | Public key |
+|---|---|---|
+| Linux / macOS | `~/.ssh/id_ed25519` | `~/.ssh/id_ed25519.pub` |
+| Windows | `%USERPROFILE%\.ssh\id_ed25519` | `%USERPROFILE%\.ssh\id_ed25519.pub` |
+
+Show your **public** key so you can copy its text (you'll paste it onto the VM in [Client-side setup](#client-side-setup)):
+
+- Linux / macOS: `cat ~/.ssh/id_ed25519.pub`
+- Windows: `type %USERPROFILE%\.ssh\id_ed25519.pub`
+
+---
+
+## Choose your mode
+
+The very first question the script asks is **which mode you want**. Pick one and jump to its guide:
 
 | Mode | Pick this if… | Go to |
 |------|----------------|-------|
@@ -101,16 +133,15 @@ Host ssh.example.com
   StrictHostKeyChecking accept-new
 ```
 
-**3. (Recommended) Set up an SSH key — one command each**
+**3. Add your public key to the server — run this ON the VM**
 
-On the **client**, generate a key:
+Copy the **public** key text you printed earlier in [Set up your SSH key first](#set-up-your-ssh-key-first-recommended), then run this **on the VM/server** (paste your key in place of the example), as the user you'll log in as:
+
 ```bash
-ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f ~/.ssh/id_ed25519 -N ""
+mkdir -p ~/.ssh && echo "ssh-ed25519 AAAA...your-public-key... you@host" >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
 ```
-Copy it to the **server**:
-```bash
-ssh-copy-id <your-user>@ssh.example.com
-```
+
+> One command: it creates `~/.ssh` if missing, appends your key, and fixes the permissions SSH requires.
 
 **4. Connect**
 ```bash
