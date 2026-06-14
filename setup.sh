@@ -212,7 +212,14 @@ if [[ $USE_ACCESS == "yes" && -z $ACCESS_EMAILS ]]; then
   echo "a 6-digit code Cloudflare emails them - so NO Google/Gmail account is needed."
   echo "(The 'One-time PIN' login method must be enabled in your Cloudflare"
   echo " Zero Trust dashboard: Settings > Authentication. It is on by default.)"
-  ask ACCESS_EMAILS "Email address(es) allowed to log in (comma-separated)"
+  # Add emails one at a time: after each one we ask whether to add another.
+  # Answer 'n' to finish the list and move on. Stored comma-separated, which is
+  # what every downstream step already expects.
+  while true; do
+    ask one_email "Email address allowed to log in"
+    ACCESS_EMAILS="${ACCESS_EMAILS:+$ACCESS_EMAILS,}$one_email"
+    ask_yn "Add another email that can log in?" || break
+  done
 fi
 
 # --- pre-flight credential & permission checks ------------------------------
@@ -398,28 +405,48 @@ if [[ $USE_ACCESS == "yes" ]]; then
   [[ $MODE == "browser" ]] && APP_TYPE="ssh"
 
   # --- 1. Reusable Access policy (created first, then attached to the app) ---
-  # One account-level "one-time-pin" policy that any app can share:
+  # A reusable policy holds:
   #   include = the allowed emails        -> match ANY one of them
   #   require = the One-Time PIN method    -> must ALWAYS hold
   # Putting the login method in REQUIRE is the fix for "terminal just gets
   # approved": it forces EVERY login - terminal and browser alike - through the
   # emailed 6-digit PIN, instead of silently reusing some other session.
-  POLICY_NAME="one-time-pin"
+  #
+  # We match an existing policy by its allowed-email SET (not just its name), so a
+  # different VM with a different list of emails never reuses the wrong policy. If
+  # no policy has exactly this email set, we create a NEW one under a free name
+  # (one-time-pin, then one-time-pin(1), (2), ...) so existing policies are never
+  # overwritten.
   INCLUDE_JSON=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
     | jq -R '{email:{email:.}}' | jq -s '.')
   REQUIRE_JSON="[{\"login_method\":{\"id\":\"$OTP_IDP_ID\"}}]"
+  # Normalized (trimmed, de-duped) list of just the email strings we want to allow.
+  DESIRED_EMAILS=$(tr ',' '\n' <<<"$ACCESS_EMAILS" | sed 's/^ *//;s/ *$//' | grep -v '^$' \
+    | jq -R '.' | jq -s 'unique')
 
-  info "Access: looking for an existing reusable policy named '$POLICY_NAME'..."
+  info "Access: looking for an existing policy whose allowed emails match exactly..."
   POL_LIST=$(cf_api GET "/accounts/$CF_ACCOUNT_ID/access/policies")
   require_success "$POL_LIST" "Could not list reusable Access policies"
-  POLICY_ID=$(jq -r --arg n "$POLICY_NAME" '.result[]? | select(.name == $n) | .id' <<<"$POL_LIST" | head -1)
+  # Reuse only if a policy's include-email set == our set AND it requires OTP.
+  POLICY_ID=$(jq -r --argjson want "$DESIRED_EMAILS" --arg otp "$OTP_IDP_ID" '
+    .result[]?
+    | select(([.include[]?.email.email] | unique) == ($want | unique))
+    | select([.require[]?.login_method.id] | index($otp))
+    | .id' <<<"$POL_LIST" | head -1)
 
   if [[ -n $POLICY_ID ]]; then
-    warn "A reusable policy named '$POLICY_NAME' already exists ($POLICY_ID)."
+    POLICY_NAME=$(jq -r --arg id "$POLICY_ID" '.result[]? | select(.id == $id) | .name' <<<"$POL_LIST" | head -1)
+    warn "A policy with exactly these allowed emails already exists ('$POLICY_NAME', $POLICY_ID)."
     ok "Reusing it - NOT creating a duplicate policy."
     echo "  (To change who can log in, edit this policy in the Zero Trust"
     echo "   dashboard > Access > Policies, then re-run - that avoids duplicates.)"
   else
+    # Pick a name not already taken, so we never clobber a different policy.
+    EXISTING_NAMES=$(jq -r '.result[]?.name' <<<"$POL_LIST")
+    POLICY_NAME="one-time-pin"; n=1
+    while grep -qxF "$POLICY_NAME" <<<"$EXISTING_NAMES"; do
+      POLICY_NAME="one-time-pin($n)"; n=$((n+1))
+    done
     info "Creating reusable policy '$POLICY_NAME' (One-Time PIN required for: $ACCESS_EMAILS)"
     POLICY_RESP=$(cf_api POST "/accounts/$CF_ACCOUNT_ID/access/policies" "{
       \"name\": \"$POLICY_NAME\",
